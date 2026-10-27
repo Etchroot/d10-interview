@@ -1,13 +1,17 @@
 """AI 면접 코치 — Streamlit 화면만. 프롬프트는 prompts.py, API 호출은 llm.py, 계산은 coach.py."""
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 import coach
 import prompts
+import store
+import ui
 from llm import LLMError, ask_json, is_demo, model_name
 
 st.set_page_config(page_title="AI 면접 코치", page_icon="🎤", layout="wide")
+ui.apply_style()
 
 DEFAULTS = {
     "stage": "start",          # start → interview → done
@@ -24,6 +28,7 @@ DEFAULTS = {
     "code": None,
     "code_review": None,
     "last_questions": None,
+    "saved": False,            # 이번 면접 점수를 랭킹에 올렸는지
 }
 for key, value in DEFAULTS.items():
     if key not in st.session_state:
@@ -31,7 +36,8 @@ for key, value in DEFAULTS.items():
 ss = st.session_state
 
 
-TAB_INTERVIEW, TAB_EVAL, TAB_RETRY, TAB_CODE, TAB_REPORT = "🎤 면접", "📊 평가", "🔁 재도전", "💻 코드 면접", "📄 리포트"
+TAB_INTERVIEW, TAB_EVAL, TAB_RETRY, TAB_CODE, TAB_DASH, TAB_REPORT = (
+    "🎤 면접", "📊 평가", "🔁 재도전", "💻 코드 면접", "🏆 대시보드", "📄 리포트")
 
 
 def reset():
@@ -80,28 +86,41 @@ def ask_current():
 # 사이드바 상태창
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.header("📟 상태창")
+    st.markdown("### 🎤 면접 코치")
+    st.caption("📟 상태창")
     if ss.profile:
         st.caption(f"{ss.profile['name']} · {ss.profile['track']} · {ss.profile['company']}")
     done_count = coach.TOTAL_QUESTIONS if ss.stage == "done" else ss.idx
     st.progress(done_count / coach.TOTAL_QUESTIONS, text=f"질문 {min(done_count + (ss.stage == 'interview'), coach.TOTAL_QUESTIONS)}/{coach.TOTAL_QUESTIONS}")
-    st.metric("면접관이 본 직무 이해도", f"{ss.understanding} / 100")
+    ui.stat_card("면접관이 본 직무 이해도", f"{ss.understanding} / 100", "답할 때마다 바뀌어요", tone="teal", icon="🧠")
+    st.write("")
     if ss.stage == "interview":
         st.caption(f"이번 질문 꼬리 질문: {ss.follow_ups}/{coach.MAX_FOLLOW_UPS}")
-    if st.button("🔄 처음부터 다시", use_container_width=True):
+    if st.button("🔄 처음부터 다시", width="stretch"):
         reset()
         st.rerun()
     st.divider()
     st.caption("🧪 데모 모드 (API 호출 없음)" if is_demo() else f"모델: {model_name()}")
 
-st.title("🎤 AI 면접 코치")
-st.caption("클래스로(수업용 가상 회사) 신입 모의면접 · 면접 5문제 → 위원 4명 평가 → 재도전")
+ui.header("🎤 AI 면접 코치", "클래스로(수업용 가상 회사) 신입 모의면접 · 면접 5문제 → 위원 4명 평가 → 재도전 → 다른 사람과 비교")
+
+
+def load_scores():
+    try:
+        return store.load()
+    except store.StoreError as e:
+        st.error(str(e))
+        return []
 
 # ---------------------------------------------------------------------------
 # ① 시작
 # ---------------------------------------------------------------------------
 if ss.stage == "start":
-    with st.form("start"):
+    left, right = st.columns([3, 2], gap="large")
+    left_card = left.container(key="card_start")
+    left_card.subheader("면접 준비")
+    form = left_card.form("start", border=False)
+    with form:
         col1, col2 = st.columns(2)
         name = col1.text_input("이름 (별명 가능)", placeholder="실제 개인정보는 넣지 마세요")
         track = col2.selectbox("지원 직군", list(coach.TRACKS), index=0)
@@ -125,9 +144,21 @@ if ss.stage == "start":
             say(f"안녕하세요, {ss.profile['name']}님. {track} 면접을 시작할게요. 질문은 {coach.TOTAL_QUESTIONS}개예요.")
             ask_current()
             st.rerun()
-    with st.expander("면접관 미리 보기"):
-        for label, (key, _) in coach.TRACKS.items():
-            st.markdown(f"**{label}** — {prompts.PERSONAS[key]}")
+    with right:
+        with ui.card("rank_preview"):
+            st.subheader("🏆 랭킹 미리 보기")
+            rows = load_scores()
+            if rows:
+                st.dataframe(pd.DataFrame(coach.leaderboard(rows, top=5)), hide_index=True)
+                st.caption(f"전체 {len(rows)}명 · 면접을 마치면 내 점수와 비교할 수 있어요")
+            else:
+                st.caption("아직 올라온 점수가 없어요. 첫 번째 주인공이 되어 보세요!")
+        st.write("")
+        with ui.card("personas"):
+            st.subheader("면접관")
+            for label, (key, _) in coach.TRACKS.items():
+                with st.expander(label, expanded=label in coach.DEV_TRACKS):
+                    st.write(prompts.PERSONAS[key])
     st.stop()
 
 # ---------------------------------------------------------------------------
@@ -137,12 +168,12 @@ tab_names = [TAB_INTERVIEW, TAB_EVAL, TAB_RETRY]
 is_dev = ss.profile["track"] in coach.DEV_TRACKS
 if is_dev:
     tab_names.append(TAB_CODE)
-tab_names.append(TAB_REPORT)
+tab_names += [TAB_DASH, TAB_REPORT]
 # key 로 지금 탭을 session_state 에 두면 버튼으로 탭을 옮길 수 있다
 tabs = st.tabs(tab_names, key="active_tab", on_change="rerun")
 tab_interview, tab_eval, tab_retry = tabs[:3]
 tab_code = tabs[3] if is_dev else None
-tab_report = tabs[-1]
+tab_dash, tab_report = tabs[-2], tabs[-1]
 
 # ---------------------------------------------------------------------------
 # ② 면접
@@ -223,18 +254,29 @@ with tab_eval:
 
     ev = ss.evaluation
     if ev:
-        c1, c2 = st.columns(2)
-        c1.metric("위원 평균", f"{ev['panel_avg']} / 10")
-        c2.metric("답변 합계", f"{ev['answers_total']} / {ev['answers_max']}")
-        st.dataframe(
-            pd.DataFrame(ev["panel"]).rename(columns={"role": "위원", "score": "점수", "against": "뽑지 말아야 할 이유 (반론 먼저)", "good": "좋은 점"})[
-                ["위원", "점수", "뽑지 말아야 할 이유 (반론 먼저)", "좋은 점"]
-            ],
-            hide_index=True,
-            use_container_width=True,
-        )
-        st.markdown(f"**⚡ 판단이 갈린 곳** — {ev['conflict']}")
-        st.markdown(f"**🤝 모두 같은 판단** — {ev['agree']}")
+        to_fix = [a for a in ev["answers"] if coach.needs_rewrite(a)]
+        best = max(ev["answers"], key=lambda a: a["total"]) if ev["answers"] else None
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            ui.stat_card("위원 평균", f"{ev['panel_avg']} / 10", "위원 4명 점수의 평균", tone="blue", icon="👥")
+        with c2:
+            ui.stat_card("답변 합계", f"{ev['answers_total']} / {ev['answers_max']}", "기준 4개 × 질문 수", tone="teal", icon="📝")
+        with c3:
+            ui.stat_card("고칠 답", f"{len(to_fix)}개", f"{coach.PASS_SCORE}점 미만인 답", tone="pink", icon="🔧")
+        with c4:
+            ui.stat_card("가장 좋은 답", f"Q{best['no']} · {best['total']}/20" if best else "-", "이 답의 구조를 다른 답에도", tone="yellow", icon="⭐")
+        st.write("")
+        with ui.card("panel"):
+            st.subheader("위원 4명 (반론 먼저)")
+            st.dataframe(
+                pd.DataFrame(ev["panel"]).rename(columns={"role": "위원", "score": "점수", "against": "뽑지 말아야 할 이유", "good": "좋은 점"})[
+                    ["위원", "점수", "뽑지 말아야 할 이유", "좋은 점"]
+                ],
+                hide_index=True,
+                            )
+            st.markdown(f"**⚡ 판단이 갈린 곳** — {ev['conflict']}")
+            st.markdown(f"**🤝 모두 같은 판단** — {ev['agree']}")
+        st.write("")
 
         st.subheader("답변별 점수")
         q_by_no = {q["no"]: q for q in ss.questions}
@@ -244,8 +286,7 @@ with tab_eval:
                 st.dataframe(
                     pd.DataFrame([{coach.CRITERIA[k]: a[k] for k in coach.CRITERIA}]),
                     hide_index=True,
-                    use_container_width=True,
-                )
+                                    )
                 st.markdown(f"**가장 약한 점** — {a['weak']}")
                 if coach.needs_rewrite(a):
                     st.markdown("**고친 답** (내 경험으로만, `[확인 필요]`는 내가 채울 칸)")
@@ -261,7 +302,9 @@ with tab_eval:
             st.markdown(f"- {n}")
         weakest = coach.weakest_first(ev["answers"])[0] if ev["answers"] else None
         if weakest:
-            st.button(f"🔁 가장 약한 Q{weakest['no']}부터 다시 답하러 가기", type="primary", on_click=go_to, args=(TAB_RETRY,))
+            b1, b2 = st.columns(2)
+            b1.button(f"🔁 가장 약한 Q{weakest['no']}부터 다시 답하러 가기", type="primary", on_click=go_to, args=(TAB_RETRY,))
+            b2.button("🏆 다른 사람과 비교하러 가기", on_click=go_to, args=(TAB_DASH,))
 
 # ---------------------------------------------------------------------------
 # ④⑤ 재도전 — 전 → 후 비교는 coach.compare()
@@ -306,7 +349,7 @@ with tab_retry:
             st.divider()
             col1, col2 = st.columns([1, 2])
             col1.metric(f"Q{r['no']} 재도전 점수", f"{c['after_total']} / 20", delta=c["delta"])
-            col2.dataframe(pd.DataFrame(c["rows"]), hide_index=True, use_container_width=True)
+            col2.dataframe(pd.DataFrame(c["rows"]), hide_index=True)
             st.caption(f"남은 약점: {r['weak']}")
 
 # ---------------------------------------------------------------------------
@@ -380,8 +423,109 @@ if tab_code is not None:
                         ["등급", "함수 · 옵션", "신뢰도(%)", "확인할 곳"]
                     ],
                     hide_index=True,
-                    use_container_width=True,
-                )
+                                    )
+
+# ---------------------------------------------------------------------------
+# 🏆 비교 대시보드 — 숫자는 coach.py, 저장은 store.py
+# ---------------------------------------------------------------------------
+def criteria_chart(mine, rows):
+    data = pd.DataFrame(coach.criteria_compare(mine, rows)).melt("기준", var_name="대상", value_name="점수").dropna()
+    order = ["나", "비교 대상 평균"]
+    base = alt.Chart(data).encode(
+        x=alt.X("기준:N", sort=list(coach.CRITERIA.values()), title=None, axis=alt.Axis(labelAngle=0)),
+        xOffset=alt.XOffset("대상:N", sort=order),
+        y=alt.Y("점수:Q", scale=alt.Scale(domain=[0, 5]), title="점수 (0~5)", axis=alt.Axis(tickCount=5, gridColor="#EEF2F6")),
+        color=alt.Color("대상:N", sort=order, scale=alt.Scale(domain=order, range=[ui.ME, ui.OTHERS]),
+                        legend=alt.Legend(orient="top", title=None)),
+        tooltip=["기준", "대상", "점수"],
+    )
+    bars = base.mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, size=22)
+    labels = base.mark_text(dy=-8, fontSize=11, color=ui.DARK).encode(text=alt.Text("점수:Q", format=".1f"))
+    return (bars + labels).properties(height=280, background="#FFFFFF").configure_view(stroke=None)
+
+
+def distribution_chart(my_pct, rows):
+    edges = list(range(0, 100, 10))
+    counts = {b: 0 for b in edges}
+    for r in rows:
+        counts[min(int(r.get("answer_pct", 0)) // 10 * 10, 90)] += 1
+    my_bin = min(my_pct // 10 * 10, 90) if my_pct is not None else None
+    data = pd.DataFrame([{"구간": f"{b}~", "인원": counts[b], "내 구간": b == my_bin} for b in edges])
+    base = alt.Chart(data).encode(
+        x=alt.X("구간:N", sort=None, title="답변 점수 (%, 10점 구간)", axis=alt.Axis(labelAngle=0)),
+        y=alt.Y("인원:Q", title="인원", axis=alt.Axis(tickMinStep=1, gridColor="#EEF2F6")),
+        tooltip=["구간", "인원"],
+    )
+    bars = base.mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+        color=alt.condition(alt.datum["내 구간"], alt.value(ui.ME), alt.value("#B8E2FB")))
+    me = base.transform_filter(alt.datum["내 구간"]).mark_text(dy=-8, fontSize=11, fontWeight="bold", color=ui.DARK).encode(text=alt.value("나"))
+    return (bars + me).properties(height=280, background="#FFFFFF").configure_view(stroke=None)
+
+
+with tab_dash:
+    track = ss.profile["track"]
+    rows = load_scores()
+    mine = coach.build_record(ss.profile, ss.evaluation, ss.retries) if ss.evaluation else None
+
+    top = st.columns([3, 2])
+    scope = top[0].segmented_control("비교 범위", [track, "전체 직군"], default=track, key="dash_scope") or track
+    top[1].caption("🌐 모두와 같이 보는 랭킹 (Supabase)" if store.is_shared()
+                   else "💻 이 PC에만 저장되는 연습용 랭킹 · 배포 앱에서 같이 보려면 Supabase 연결 필요")
+
+    if mine and not ss.saved:
+        with ui.card("save"):
+            st.markdown(f"**🏆 내 점수를 랭킹에 올릴까요?** 별명 **{mine['nickname']}** · {track} · 점수만 저장돼요. 면접 답변 내용은 저장하지 않아요.")
+            if st.button("랭킹에 내 점수 올리기", type="primary"):
+                try:
+                    ss.saved = store.save(mine)
+                    st.rerun()
+                except store.StoreError as e:
+                    st.error(str(e))
+        st.write("")
+    elif not mine:
+        st.info("평가를 받으면 내 점수를 다른 사람과 비교할 수 있어요. 지금은 다른 사람 점수만 보여요.")
+        st.button("📊 평가받으러 가기", key="to_eval_from_dash", on_click=go_to, args=(TAB_EVAL,))
+
+    # 비교 대상: 범위에 맞는 기록에서 방금 올린 내 기록은 뺀다
+    pool = rows if scope == "전체 직군" else coach.track_rows(rows, track)
+    saved_at = ss.saved["created_at"] if ss.saved else None
+    others = [r for r in pool if not (saved_at and r.get("created_at") == saved_at and r.get("nickname") == mine["nickname"])]
+
+    avg_pct = coach.mean([r.get("answer_pct") for r in others])
+    rank = coach.top_percent(mine["answer_pct"], others) if mine else None
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        ui.stat_card("내 답변 점수", f"{mine['answer_pct']}%" if mine else "-", "기준 4개 합계를 %로", tone="blue", icon="🙋")
+    with c2:
+        ui.stat_card("비교 대상 평균", f"{avg_pct}%" if avg_pct is not None else "-", scope, tone="teal", icon="👥")
+    with c3:
+        ui.stat_card("내 위치", f"상위 {rank}%" if rank else "-", "나보다 높은 사람 수 기준", tone="yellow", icon="🏅")
+    with c4:
+        ui.stat_card("비교 인원", f"{len(others)}명", "나를 뺀 기록 수", tone="pink", icon="📈")
+    st.write("")
+
+    if not others:
+        st.info("아직 비교할 기록이 없어요. 짝꿍에게 면접을 보고 랭킹에 올려 달라고 해 보세요.")
+    else:
+        g1, g2 = st.columns(2, gap="medium")
+        with g1, ui.card("chart_criteria"):
+            st.subheader("기준별 점수 · 나 vs 평균")
+            if mine:
+                st.altair_chart(criteria_chart(mine, others))
+                with st.expander("표로 보기"):
+                    st.dataframe(pd.DataFrame(coach.criteria_compare(mine, others)), hide_index=True)
+            else:
+                st.caption("평가를 받으면 내 점수가 함께 보여요.")
+                st.dataframe(pd.DataFrame([{"기준": label, "평균": coach.mean([r.get(k) for r in others])}
+                                           for k, label in coach.CRITERIA.items()]), hide_index=True)
+        with g2, ui.card("chart_dist"):
+            st.subheader("답변 점수 분포")
+            st.altair_chart(distribution_chart(mine["answer_pct"] if mine else None, others))
+            st.caption("진한 막대가 내 점수가 속한 구간이에요.")
+        st.write("")
+        with ui.card("leaderboard"):
+            st.subheader(f"🏆 랭킹 TOP 10 · {scope}")
+            st.dataframe(pd.DataFrame(coach.leaderboard(pool)), hide_index=True)
 
 # ---------------------------------------------------------------------------
 # ⑥ 마지막 질문 다듬기 · 리포트

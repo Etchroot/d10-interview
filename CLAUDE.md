@@ -14,6 +14,8 @@
 | `llm.py` | OpenAI 호출 **한 곳**. `ask_json(instructions, user_input, schema, name)` | 화면 코드 |
 | `coach.py` | 질문 고르기 · 점수 합계 · 비교 · 리포트 (AI 없이 계산) | API 호출 |
 | `app.py` | Streamlit 화면만 | 프롬프트 문자열 · API 직접 호출 |
+| `ui.py` | 화면 꾸미기 (카드 · 통계 카드 · 탭 CSS) | 계산 · API 호출 |
+| `store.py` | 랭킹 점수 저장 · 불러오기 (Supabase 또는 로컬 파일) | 점수 계산 · 답변 원문 저장 |
 | `data/questions.csv` | 질문 은행 (칸: 직군, 유형, 질문, 보는 점) | |
 
 ## 프롬프트 규칙

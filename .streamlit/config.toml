@@ -1,0 +1,22 @@
+# MaterialM 느낌의 밝은 대시보드 테마
+[theme]
+base = "light"
+primaryColor = "#00A1FF"
+backgroundColor = "#F4F7FB"
+secondaryBackgroundColor = "#EFF4FA"
+textColor = "#1F2A3D"
+linkColor = "#0086D6"
+borderColor = "#E0E6EB"
+showWidgetBorder = true
+showSidebarBorder = false
+baseRadius = "12px"
+buttonRadius = "full"
+font = "Pretendard Variable:https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css, sans-serif"
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+metricValueFontWeight = 700
+dataframeHeaderBackgroundColor = "#F4F7FB"
+chartCategoricalColors = ["#0086D6", "#E8618C"]
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F7FB"

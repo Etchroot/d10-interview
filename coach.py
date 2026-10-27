@@ -214,3 +214,58 @@ def build_report(profile, questions, transcript, evaluation, retries, code_resul
             lines.append(f"- **{who}**: {turn['content']}")
         lines.append("")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# 비교 대시보드 — 저장할 숫자와 순위도 코드가 계산 (답변 원문은 저장하지 않음)
+# ---------------------------------------------------------------------------
+NICKNAME_MAX = 12
+
+
+def build_record(profile, evaluation, retries):
+    answers = evaluation["answers"]
+    n = len(answers) or 1
+    record = {
+        "nickname": profile["name"][:NICKNAME_MAX],
+        "track": profile["track"],
+        "panel_avg": evaluation["panel_avg"],
+        "answer_pct": round(100 * evaluation["answers_total"] / (evaluation["answers_max"] or 1)),
+        "retry_best": max((r["compare"]["delta"] for r in retries), default=None),
+    }
+    for key in CRITERIA:
+        record[key] = round(sum(a[key] for a in answers) / n, 1)
+    return record
+
+
+def track_rows(rows, track):
+    return [r for r in rows if r.get("track") == track]
+
+
+def mean(values):
+    values = [v for v in values if v is not None]
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def criteria_compare(mine, rows):
+    """기준별 나 vs 평균 (0~5)."""
+    return [
+        {"기준": label, "나": mine[key], "비교 대상 평균": mean([r.get(key) for r in rows])}
+        for key, label in CRITERIA.items()
+    ]
+
+
+def top_percent(my_pct, rows):
+    """내 답변 점수가 같은 직군에서 상위 몇 %인지 (나보다 높은 사람 수 기준)."""
+    if not rows:
+        return None
+    higher = sum(1 for r in rows if r.get("answer_pct", 0) > my_pct)
+    return max(1, round(100 * (higher + 1) / (len(rows) + 1)))
+
+
+def leaderboard(rows, top=10):
+    ranked = sorted(rows, key=lambda r: (-r.get("answer_pct", 0), -r.get("panel_avg", 0)))[:top]
+    return [
+        {"순위": i + 1, "별명": r.get("nickname", "-"), "답변 점수(%)": r.get("answer_pct"),
+         "위원 평균": r.get("panel_avg"), "날짜": str(r.get("created_at", ""))[:10]}
+        for i, r in enumerate(ranked)
+    ]
