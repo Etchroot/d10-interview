@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
+import requests
 
 from llm import _setting
 
@@ -39,10 +39,10 @@ def save(record):
     if sb:
         url, headers = sb
         try:
-            r = httpx.post(f"{url}/rest/v1/{TABLE}", json=record,
+            r = requests.post(f"{url}/rest/v1/{TABLE}", json=record,
                            headers={**headers, "Prefer": "return=minimal"}, timeout=15)
             r.raise_for_status()
-        except httpx.HTTPError:
+        except requests.RequestException:
             raise StoreError("점수를 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.") from None
         return record
     LOCAL_PATH.parent.mkdir(exist_ok=True)
@@ -56,11 +56,11 @@ def load(limit=1000):
     if sb:
         url, headers = sb
         try:
-            r = httpx.get(f"{url}/rest/v1/{TABLE}", headers=headers, timeout=15,
+            r = requests.get(f"{url}/rest/v1/{TABLE}", headers=headers, timeout=15,
                           params={"select": "*", "order": "created_at.desc", "limit": str(limit)})
             r.raise_for_status()
             return r.json()
-        except httpx.HTTPError:
+        except requests.RequestException:
             raise StoreError("다른 사람 점수를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.") from None
     if not LOCAL_PATH.exists():
         return []
