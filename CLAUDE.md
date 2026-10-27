@@ -52,4 +52,5 @@
 
 ## 실수에서 배운 규칙
 - (10/27) "질문이 무슨 뜻이에요?"에 다시 설명한 것도 꼬리 질문 1회로 세서, 진짜 답이 약해도 꼬리 질문을 못 함 (왜: AI가 되묻기와 꼬리 질문을 같은 follow_up 하나로 돌려줌) → 검사: INTERVIEWER_SCHEMA 에 `clarify` 를 두고 coach.MAX_CLARIFY 로 따로 센다. 되묻기 → 짧게 답하기 순서로 꼬리 질문이 1번 나오는지 확인
+- (10/27) store.py 가 `httpx` 를 import 했는데 내 PC에만 깔려 있어서 배포 앱이 ModuleNotFoundError (왜: requirements.txt 에 없는 패키지를 씀) → 검사: 새 import 를 넣으면 requirements.txt 에 있는지, 또는 빈 가상환경에 requirements.txt 만 설치해 `import` 해 보기
 <!-- - (10/27) ___ (왜: ___) → 검사: ___ -->
