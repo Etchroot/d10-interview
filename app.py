@@ -31,9 +31,19 @@ for key, value in DEFAULTS.items():
 ss = st.session_state
 
 
+TAB_INTERVIEW, TAB_EVAL, TAB_RETRY, TAB_CODE, TAB_REPORT = "🎤 면접", "📊 평가", "🔁 재도전", "💻 코드 면접", "📄 리포트"
+
+
 def reset():
     for key, value in DEFAULTS.items():
         ss[key] = value.copy() if isinstance(value, (list, dict)) else value
+    ss.pop("active_tab", None)
+
+
+def go_to(tab, run_eval=False):
+    # 버튼 콜백: 탭을 바꾸고, 필요하면 평가를 바로 시작하게 표시
+    ss.active_tab = tab
+    ss.run_eval = run_eval
 
 
 def call(instructions, user_input, schema, name, kind="main", waiting="면접관이 생각 중이에요…"):
@@ -123,12 +133,13 @@ if ss.stage == "start":
 # ---------------------------------------------------------------------------
 # 탭
 # ---------------------------------------------------------------------------
-tab_names = ["🎤 면접", "📊 평가", "🔁 재도전"]
+tab_names = [TAB_INTERVIEW, TAB_EVAL, TAB_RETRY]
 is_dev = ss.profile["track"] in coach.DEV_TRACKS
 if is_dev:
-    tab_names.append("💻 코드 면접")
-tab_names.append("📄 리포트")
-tabs = st.tabs(tab_names)
+    tab_names.append(TAB_CODE)
+tab_names.append(TAB_REPORT)
+# key 로 지금 탭을 session_state 에 두면 버튼으로 탭을 옮길 수 있다
+tabs = st.tabs(tab_names, key="active_tab", on_change="rerun")
 tab_interview, tab_eval, tab_retry = tabs[:3]
 tab_code = tabs[3] if is_dev else None
 tab_report = tabs[-1]
@@ -177,16 +188,23 @@ with tab_interview:
                     else:
                         ss.stage = "done"
                         ss.idx = len(ss.questions) - 1
-                        say("면접은 여기까지예요. 수고하셨습니다. 📊 평가 탭에서 위원 4명에게 평가받아 보세요.")
+                        say("면접은 여기까지예요. 수고하셨습니다.")
                 st.rerun()
     else:
-        st.success("면접이 끝났어요. 📊 평가 탭으로 가 보세요.")
+        st.success("면접이 끝났어요. 이제 위원 4명에게 평가받아 보세요.")
+        if ss.evaluation:
+            st.button("📊 평가 결과 보러 가기", type="primary", on_click=go_to, args=(TAB_EVAL,))
+        else:
+            st.button("📊 위원 4명에게 평가받기", type="primary", on_click=go_to, args=(TAB_EVAL, True))
 
 # ---------------------------------------------------------------------------
 # ③ 평가 — 위원 4명 · 반론 먼저 · 점수 계산은 coach.py
 # ---------------------------------------------------------------------------
 with tab_eval:
-    if st.button("위원 4명에게 평가받기", type="primary"):
+    # 면접 탭의 '평가받기' 버튼으로 오면 바로 평가를 시작한다
+    auto_eval = ss.pop("run_eval", False)
+    label = "위원 4명에게 다시 평가받기" if ss.evaluation else "위원 4명에게 평가받기"
+    if st.button(label, type="secondary" if ss.evaluation else "primary") or auto_eval:
         if ss.stage != "done":
             st.warning("면접 5문제를 끝까지 마친 뒤 평가받을 수 있어요.")
         else:
@@ -201,6 +219,7 @@ with tab_eval:
             if result:
                 ss.evaluation = coach.clean_evaluation(result, ss.questions)
                 ss.retries = []
+                st.rerun()  # 버튼 문구('다시 평가받기' 등)를 바로 바꾸려고
 
     ev = ss.evaluation
     if ev:
@@ -240,6 +259,9 @@ with tab_eval:
         st.subheader("다음 연습에서 고칠 것")
         for n in ev["next"]:
             st.markdown(f"- {n}")
+        weakest = coach.weakest_first(ev["answers"])[0] if ev["answers"] else None
+        if weakest:
+            st.button(f"🔁 가장 약한 Q{weakest['no']}부터 다시 답하러 가기", type="primary", on_click=go_to, args=(TAB_RETRY,))
 
 # ---------------------------------------------------------------------------
 # ④⑤ 재도전 — 전 → 후 비교는 coach.compare()
@@ -247,7 +269,8 @@ with tab_eval:
 with tab_retry:
     ev = ss.evaluation
     if not ev or not ev["answers"]:
-        st.info("📊 평가를 먼저 받아 주세요.")
+        st.info("재도전은 평가를 받은 뒤에 할 수 있어요.")
+        st.button("📊 평가 탭으로 가기", key="to_eval_from_retry", on_click=go_to, args=(TAB_EVAL,))
     else:
         q_by_no = {q["no"]: q for q in ss.questions}
         order = coach.weakest_first(ev["answers"])
